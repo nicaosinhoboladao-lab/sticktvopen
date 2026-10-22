@@ -1,4 +1,4 @@
-name: Build Android APK
+﻿name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,3 +29,4 @@ jobs:
           path: StickTV-tablet.apk
           if-no-files-found: error
           retention-days: 30
+
