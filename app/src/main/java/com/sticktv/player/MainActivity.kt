@@ -389,7 +389,7 @@ class MainActivity : AppCompatActivity() {
             selectedCategory == CAT_FAV -> allChannels.filter { it.url in favorites }
             else -> allChannels.filter { it.group == selectedCategory }
         }
-        channelAdapter.submit(filtered, favorites, current?.url)
+        channelAdapter.submit(filtered, favorites, current?.sourcePageUrl ?: current?.url)
         val title = if (q.isNotEmpty()) "Pesquisa" else selectedCategory
         countText.text = "$title  •  ${filtered.size} canais"
     }
@@ -432,7 +432,45 @@ class MainActivity : AppCompatActivity() {
     private fun defaultModeFor(ch: Channel): Mode =
         if (ch.url.contains("m3u8", ignoreCase = true)) Mode.HLS else Mode.AUTO
 
+    private var pageResolveGeneration = 0
+
+    private fun resolvePageAndPlay(ch: Channel) {
+        val generation = ++pageResolveGeneration
+        handler.removeCallbacks(retryRunnable)
+        player.stop()
+        current = ch
+        prefs.lastChannelUrl = ch.url
+        channelAdapter.setPlaying(ch.url)
+        showInfo(ch)
+        loading.visibility = View.VISIBLE
+        showStatus("Procurando um link de vídeo público na página...")
+        scope.launch {
+            try {
+                val streamUrl = repo.resolvePublicStream(ch)
+                if (generation != pageResolveGeneration || current?.url != ch.url) return@launch
+                loading.visibility = View.GONE
+                if (streamUrl.isNullOrBlank()) {
+                    showStatus("A página não publica um link de vídeo direto compatível.")
+                    return@launch
+                }
+                hideStatus()
+                play(ch.copy(url = streamUrl, referer = ch.url, isPageLink = false, sourcePageUrl = ch.url))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (generation == pageResolveGeneration) {
+                    loading.visibility = View.GONE
+                    showStatus("Não foi possível ler a página: ${e.message ?: "erro de conexão"}")
+                }
+            }
+        }
+    }
+
     private fun play(ch: Channel, newMode: Mode = defaultModeFor(ch), isRetry: Boolean = false) {
+        if (ch.isPageLink && !isRetry) {
+            resolvePageAndPlay(ch)
+            return
+        }
         handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(pendingPlayRunnable)
         pendingChannel = null
@@ -442,14 +480,14 @@ class MainActivity : AppCompatActivity() {
         mode = newMode
         reachedReady = false
         inWebFallback = false
-        prefs.lastChannelUrl = ch.url
+        prefs.lastChannelUrl = ch.sourcePageUrl ?: ch.url
         if (!isRetry) hideStatus()
 
         player.setMediaSource(buildMediaSource(ch, newMode == Mode.HLS))
         player.prepare()
         player.playWhenReady = true
 
-        channelAdapter.setPlaying(ch.url)
+        channelAdapter.setPlaying(ch.sourcePageUrl ?: ch.url)
         if (!isRetry) showInfo(ch)
     }
 
@@ -487,7 +525,10 @@ class MainActivity : AppCompatActivity() {
             // Link sem extensão que na verdade é HLS
             formatError && !reachedReady && mode == Mode.AUTO ->
                 play(ch, Mode.HLS, isRetry = true)
-            // Não é stream: é uma página web -> abre no modo web com bloqueio de anúncios
+            // Links de página importados só tocam mídia publicada diretamente; nunca abrem o site como player.
+            formatError && ch.sourcePageUrl != null ->
+                showStatus("O link de vídeo encontrado não tem um formato compatível.")
+            // Links diretos que são páginas podem usar o modo web de reserva.
             formatError && !reachedReady && ch.url.startsWith("http", ignoreCase = true) ->
                 openWeb(ch)
             else -> scheduleRetry()
