@@ -4,7 +4,7 @@ import android.text.Html
 import java.net.URI
 import java.util.Locale
 
-/** Imports visible same-site page links only; it does not inspect scripts or media players. */
+/** Imports same-site page links and reads only explicit standard HTML video sources. */
 object HtmlLinkParser {
     private val anchorRegex = Regex("""(?is)<a\b([^>]*)>(.*?)</a\s*>""")
     private val hrefRegex = Regex("""(?is)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
@@ -15,6 +15,8 @@ object HtmlLinkParser {
         "search", "facebook", "instagram", "telegram", "whatsapp", "twitter", "x"
     )
     private val mediaExtension = Regex("""(?i)\.(m3u8?|mpd|mp4|mkv|m4v|ts|webm|mov)(?:$|[?#])""")
+    private val mediaSrcRegex = Regex("""(?is)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
+    private val metaContentRegex = Regex("""(?is)\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
 
     fun parse(html: String, sourceUrl: String): List<Channel> {
         val base = runCatching { URI(sourceUrl) }.getOrNull() ?: return emptyList()
@@ -52,13 +54,39 @@ object HtmlLinkParser {
                 logo = null,
                 group = "Links da página",
                 userAgent = null,
-                referer = sourceUrl
+                referer = sourceUrl,
+                isPageLink = true
             )
             if (channels.size >= 500) break
         }
         return channels
     }
 
+    /** Reads only media URLs explicitly present in standard public HTML tags. */
+    fun extractPublicStream(html: String, pageUrl: String): String? {
+        val base = runCatching { URI(pageUrl) }.getOrNull() ?: return null
+        val candidates = ArrayList<String>()
+        val tagRegex = Regex("""(?is)<(?:video|source)\b[^>]*>""")
+        for (match in tagRegex.findAll(html)) {
+            val tag = match.value
+            mediaSrcRegex.find(tag)?.let { found -> (1..3).firstNotNullOfOrNull { found.groups[it]?.value }?.let(candidates::add) }
+        }
+        val metaRegex = Regex("""(?is)<meta\b[^>]*>""")
+        val videoProperties = setOf("og:video", "og:video:url", "twitter:player:stream", "contenturl")
+        for (match in metaRegex.findAll(html)) {
+            val tag = match.value
+            val property = Regex("""(?is)\b(?:property|name|itemprop)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+                .find(tag)?.let { it.groups[1]?.value ?: it.groups[2]?.value }?.lowercase(Locale.ROOT)
+            if (property !in videoProperties) continue
+            metaContentRegex.find(tag)?.let { found -> (1..3).firstNotNullOfOrNull { found.groups[it]?.value }?.let(candidates::add) }
+        }
+        for (candidate in candidates) {
+            val raw = decode(candidate).trim()
+            val resolved = runCatching { base.resolve(URI(raw.replace(" ", "%20")).normalize()) }.getOrNull() ?: continue
+            if (resolved.scheme in setOf("http", "https") && !resolved.host.isNullOrBlank()) return resolved.toASCIIString()
+        }
+        return null
+    }
     @Suppress("DEPRECATION")
     private fun decode(value: String): String = Html.fromHtml(value).toString()
 }
