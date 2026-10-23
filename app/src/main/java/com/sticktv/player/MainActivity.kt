@@ -25,21 +25,11 @@ import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.extractor.DefaultExtractorsFactory
-import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -56,21 +46,14 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val CAT_ALL = "Todos os canais"
         private const val CAT_FAV = "â˜… Favoritos"
-        private const val MAX_RETRIES = 1
-        private val FORMAT_ERRORS = setOf(
-            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-            PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-            PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED
-        )
     }
-
     private val scope = MainScope()
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var prefs: Prefs
     private lateinit var repo: PlaylistRepository
     private lateinit var player: ExoPlayer
+    private lateinit var failoverController: PlayerFailoverController
 
     private lateinit var playerView: PlayerView
     private lateinit var loading: ProgressBar
@@ -101,9 +84,6 @@ class MainActivity : AppCompatActivity() {
     private var current: Channel? = null
     private var pendingChannel: Channel? = null
     private var mode = Mode.AUTO
-    private var reachedReady = false
-    private var retryCount = 0
-    private var activeVariantIndex = 0
     private var inWebFallback = false
     private var stoppedInBackground = false
     private var swallowKey = -1
@@ -113,13 +93,7 @@ class MainActivity : AppCompatActivity() {
     private var settingsDialog: AlertDialog? = null
     private var lastSourceSummary = ""
 
-    private val extractorsFactory by lazy {
-        DefaultExtractorsFactory()
-            .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
-    }
-
     private val hideInfoRunnable = Runnable { infoBanner.visibility = View.GONE }
-    private val retryRunnable = Runnable { current?.let { play(it, mode, isRetry = true) } }
     private val pendingPlayRunnable = Runnable {
         val ch = pendingChannel
         pendingChannel = null
@@ -152,6 +126,7 @@ class MainActivity : AppCompatActivity() {
 
         bindViews()
         setupPlayer()
+        failoverController = PlayerFailoverController(player, scope, StreamHealth(this)) { message -> showStatus(message) }
         setupLists()
         setupSearch()
         setupBack()
@@ -184,7 +159,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(pendingPlayRunnable)
         pendingChannel = null
         if (!inWebFallback) {
@@ -198,6 +172,7 @@ class MainActivity : AppCompatActivity() {
         scope.cancel()
         handler.removeCallbacksAndMessages(null)
         settingsDialog?.dismiss()
+        if (::failoverController.isInitialized) failoverController.release()
         if (::player.isInitialized) player.release()
     }
 
@@ -243,19 +218,7 @@ class MainActivity : AppCompatActivity() {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 loading.isVisible = playbackState == Player.STATE_BUFFERING
-                when (playbackState) {
-                    Player.STATE_READY -> {
-                        reachedReady = true
-                        retryCount = 0
-                        hideStatus()
-                    }
-                    Player.STATE_ENDED -> if (current != null) scheduleRetry()
-                    else -> Unit
-                }
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                handleError(error)
+                if (playbackState == Player.STATE_READY) hideStatus()
             }
         })
     }
@@ -337,7 +300,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (allChannels.isEmpty()) {
-                showStatus("Carregando lista de canaisâ€¦")
+                showStatus("Carregando lista de canaisÃ¢â‚¬Â¦")
                 loading.visibility = View.VISIBLE
             }
 
@@ -357,12 +320,12 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 if (allChannels.isEmpty() || current == null) {
                     showStatus(
-                        "NÃ£o foi possÃ­vel carregar a lista.\n${e.message ?: ""}\n\n" +
+                        "NÃƒÂ£o foi possÃƒÂ­vel carregar a lista.\n${e.message ?: ""}\n\n" +
                             "Pressione MENU para trocar a URL."
                     )
                     if (allChannels.isEmpty()) showSettings()
                 } else {
-                    toast("Sem conexÃ£o com a lista. Usando a cÃ³pia salva.")
+                    toast("Sem conexÃƒÂ£o com a lista. Usando a cÃƒÂ³pia salva.")
                 }
             } finally {
                 loading.isVisible = player.playbackState == Player.STATE_BUFFERING
@@ -400,7 +363,7 @@ class MainActivity : AppCompatActivity() {
         }
         channelAdapter.submit(filtered, favorites, current?.sourcePageUrl ?: current?.url)
         val title = if (q.isNotEmpty()) "Pesquisa" else selectedCategory
-        countText.text = "$title  â€¢  ${filtered.size} canais"
+        countText.text = "$title  Ã¢â‚¬Â¢  ${filtered.size} canais"
     }
 
     private fun onCategoryFocused(cat: String) {
@@ -433,10 +396,10 @@ class MainActivity : AppCompatActivity() {
         prefs.favorites = favorites
         channelAdapter.setFavorites(favorites)
         if (pos != RecyclerView.NO_POSITION) channelAdapter.notifyItemChanged(pos)
-        toast(if (adding) "â˜… ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
+        toast(if (adding) "Ã¢Ëœâ€¦ ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
     }
 
-    // ---------------------------------------------------------------- reproduÃ§Ã£o
+    // ---------------------------------------------------------------- reproduÃƒÂ§ÃƒÂ£o
 
     private fun defaultModeFor(ch: Channel): Mode =
         if (ch.url.contains("m3u8", ignoreCase = true)) Mode.HLS else Mode.AUTO
@@ -445,21 +408,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun resolvePageAndPlay(ch: Channel) {
         val generation = ++pageResolveGeneration
-        handler.removeCallbacks(retryRunnable)
         player.stop()
         current = ch
         prefs.lastChannelUrl = ch.url
         channelAdapter.setPlaying(ch.url)
         showInfo(ch)
         loading.visibility = View.VISIBLE
-        showStatus("Procurando um link de vÃ­deo pÃºblico na pÃ¡gina...")
+        showStatus("Procurando um link de vÃƒÂ­deo pÃƒÂºblico na pÃƒÂ¡gina...")
         scope.launch {
             try {
                 val streamUrl = repo.resolvePublicStream(ch)
                 if (generation != pageResolveGeneration || current?.url != ch.url) return@launch
                 loading.visibility = View.GONE
                 if (streamUrl.isNullOrBlank()) {
-                    showStatus("A pÃ¡gina nÃ£o publica um link de vÃ­deo direto compatÃ­vel.")
+                    showStatus("A pÃƒÂ¡gina nÃƒÂ£o publica um link de vÃƒÂ­deo direto compatÃƒÂ­vel.")
                     return@launch
                 }
                 hideStatus()
@@ -469,7 +431,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 if (generation == pageResolveGeneration) {
                     loading.visibility = View.GONE
-                    showStatus("NÃ£o foi possÃ­vel ler a pÃ¡gina: ${e.message ?: "erro de conexÃ£o"}")
+                    showStatus("NÃƒÂ£o foi possÃƒÂ­vel ler a pÃƒÂ¡gina: ${e.message ?: "erro de conexÃƒÂ£o"}")
                 }
             }
         }
@@ -480,99 +442,18 @@ class MainActivity : AppCompatActivity() {
             resolvePageAndPlay(ch)
             return
         }
-        handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(pendingPlayRunnable)
         pendingChannel = null
-        if (!isRetry) {
-            retryCount = 0
-            activeVariantIndex = 0
-        }
-
         current = ch
         mode = newMode
-        reachedReady = false
         inWebFallback = false
         prefs.lastChannelUrl = ch.sourcePageUrl ?: ch.url
         if (!isRetry) hideStatus()
 
-        val variant = streamVariant(ch, activeVariantIndex)
-        val playbackChannel = ch.copy(url = variant.url, userAgent = variant.userAgent, referer = variant.referer)
-        player.setMediaSource(buildMediaSource(playbackChannel, newMode == Mode.HLS))
-        player.prepare()
-        player.playWhenReady = true
-
+        failoverController.play(ch, forceHls = newMode == Mode.HLS)
         channelAdapter.setPlaying(ch.sourcePageUrl ?: ch.url)
         if (!isRetry) showInfo(ch)
     }
-
-    private fun buildMediaSource(ch: Channel, hls: Boolean): MediaSource {
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(ch.userAgent ?: Config.USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(10_000)
-            .setReadTimeoutMs(15_000)
-        ch.referer?.let { http.setDefaultRequestProperties(mapOf("Referer" to it)) }
-
-        val dataSource = DefaultDataSource.Factory(this, http)
-        val builder = MediaItem.Builder().setUri(ch.url)
-        if (hls) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
-        val item = builder.build()
-
-        return if (hls) {
-            HlsMediaSource.Factory(dataSource)
-                .setAllowChunklessPreparation(true)
-                .createMediaSource(item)
-        } else {
-            DefaultMediaSourceFactory(dataSource, extractorsFactory).createMediaSource(item)
-        }
-    }
-
-    private fun handleError(error: PlaybackException) {
-        val ch = current ?: return
-        loading.visibility = View.GONE
-        val formatError = error.errorCode in FORMAT_ERRORS
-        when {
-            error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
-                player.seekToDefaultPosition()
-                player.prepare()
-            }
-            formatError && !reachedReady && mode == Mode.AUTO ->
-                play(ch, Mode.HLS, isRetry = true)
-            formatError && ch.sourcePageUrl != null ->
-                tryNextVariant(ch, "O link de vÃ­deo encontrado nÃ£o tem um formato compatÃ­vel.")
-            else -> scheduleRetry()
-        }
-    }
-
-    private fun scheduleRetry() {
-        if (retryCount < MAX_RETRIES) {
-            retryCount++
-            showStatus("Reconectandoâ€¦ (" + retryCount + "/" + MAX_RETRIES + ")")
-            handler.removeCallbacks(retryRunnable)
-            handler.postDelayed(retryRunnable, 2000L * retryCount)
-        } else {
-            tryNextVariant(current ?: return)
-        }
-    }
-
-    private fun streamVariant(channel: Channel, index: Int): StreamVariant =
-        if (index == 0) StreamVariant(channel.url, channel.userAgent, channel.referer)
-        else channel.alternatives[index - 1]
-
-    private fun tryNextVariant(channel: Channel, finalMessage: String? = null) {
-        val next = activeVariantIndex + 1
-        if (next < channel.alternatives.size + 1) {
-            activeVariantIndex = next
-            retryCount = 0
-            val variant = streamVariant(channel, activeVariantIndex)
-            val variantChannel = channel.copy(url = variant.url, userAgent = variant.userAgent, referer = variant.referer)
-            showStatus("Tentando outra fonte de " + channel.name + "â€¦")
-            play(channel, defaultModeFor(variantChannel), isRetry = true)
-        } else {
-            showStatus(finalMessage ?: "Nenhuma fonte deste canal respondeu. Escolha outro canal ou tente mais tarde.")
-        }
-    }
-
     private fun openWeb(ch: Channel) {
         player.stop()
         inWebFallback = true
@@ -660,7 +541,7 @@ class MainActivity : AppCompatActivity() {
             zapList = allChannels
             play(ch)
         } else {
-            toast("Canal $n nÃ£o encontrado")
+            toast("Canal $n nÃƒÂ£o encontrado")
         }
     }
 
@@ -737,7 +618,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    // ---------------------------------------------------------------- configuraÃ§Ãµes
+    // ---------------------------------------------------------------- configuraÃƒÂ§ÃƒÂµes
 
     private fun showSettings() {
         if (settingsDialog?.isShowing == true) return
@@ -750,25 +631,25 @@ class MainActivity : AppCompatActivity() {
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
             (if (lastSourceSummary.isNotBlank()) "$lastSourceSummary\n" else "") +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.2"
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.3"
 
         settingsDialog = AlertDialog.Builder(this)
-            .setTitle("ConfiguraÃ§Ãµes")
+            .setTitle("ConfiguraÃƒÂ§ÃƒÂµes")
             .setView(view)
             .setPositiveButton("Salvar e recarregar") { _, _ ->
                 val url = input.text.toString().trim()
                 val urls = url.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
                 if (urls.isEmpty() || urls.any { !it.startsWith("http://", true) && !it.startsWith("https://", true) }) {
-                    toast("Cada fonte deve comeÃ§ar com http:// ou https://")
+                    toast("Cada fonte deve comeÃƒÂ§ar com http:// ou https://")
                     return@setPositiveButton
                 }
                 if (extractPageLinks.isChecked && urls.size > 1) {
-                    toast("A extraÃ§Ã£o de pÃ¡ginas aceita uma URL por vez.")
+                    toast("A extraÃƒÂ§ÃƒÂ£o de pÃƒÂ¡ginas aceita uma URL por vez.")
                     return@setPositiveButton
                 }
                 applyUrl(url, extractPageLinks.isChecked)
             }
-            .setNeutralButton("Restaurar padrÃ£o") { _, _ ->
+            .setNeutralButton("Restaurar padrÃƒÂ£o") { _, _ ->
                 applyUrl(Config.DEFAULT_PLAYLIST_URL, extractPageLinks = false)
             }
             .setNegativeButton("Cancelar", null)
@@ -781,7 +662,6 @@ class MainActivity : AppCompatActivity() {
         prefs.playlistUrl = url
         prefs.extractPageLinks = extractPageLinks
         if (changed) {
-            handler.removeCallbacks(retryRunnable)
             current = null
             player.stop()
             channelAdapter.setPlaying(null)
