@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val CAT_ALL = "Todos os canais"
         private const val CAT_FAV = "★ Favoritos"
-        private const val MAX_RETRIES = 3
+        private const val MAX_RETRIES = 1
         private val FORMAT_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
@@ -103,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     private var mode = Mode.AUTO
     private var reachedReady = false
     private var retryCount = 0
+    private var activeVariantIndex = 0
     private var inWebFallback = false
     private var stoppedInBackground = false
     private var swallowKey = -1
@@ -474,7 +475,10 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(pendingPlayRunnable)
         pendingChannel = null
-        if (!isRetry) retryCount = 0
+        if (!isRetry) {
+            retryCount = 0
+            activeVariantIndex = 0
+        }
 
         current = ch
         mode = newMode
@@ -483,7 +487,9 @@ class MainActivity : AppCompatActivity() {
         prefs.lastChannelUrl = ch.sourcePageUrl ?: ch.url
         if (!isRetry) hideStatus()
 
-        player.setMediaSource(buildMediaSource(ch, newMode == Mode.HLS))
+        val variant = streamVariant(ch, activeVariantIndex)
+        val playbackChannel = ch.copy(url = variant.url, userAgent = variant.userAgent, referer = variant.referer)
+        player.setMediaSource(buildMediaSource(playbackChannel, newMode == Mode.HLS))
         player.prepare()
         player.playWhenReady = true
 
@@ -522,15 +528,10 @@ class MainActivity : AppCompatActivity() {
                 player.seekToDefaultPosition()
                 player.prepare()
             }
-            // Link sem extensão que na verdade é HLS
             formatError && !reachedReady && mode == Mode.AUTO ->
                 play(ch, Mode.HLS, isRetry = true)
-            // Links de página importados só tocam mídia publicada diretamente; nunca abrem o site como player.
             formatError && ch.sourcePageUrl != null ->
-                showStatus("O link de vídeo encontrado não tem um formato compatível.")
-            // Links diretos que são páginas podem usar o modo web de reserva.
-            formatError && !reachedReady && ch.url.startsWith("http", ignoreCase = true) ->
-                openWeb(ch)
+                tryNextVariant(ch, "O link de vídeo encontrado não tem um formato compatível.")
             else -> scheduleRetry()
         }
     }
@@ -538,11 +539,29 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleRetry() {
         if (retryCount < MAX_RETRIES) {
             retryCount++
-            showStatus("Reconectando… ($retryCount/$MAX_RETRIES)")
+            showStatus("Reconectando… (" + retryCount + "/" + MAX_RETRIES + ")")
             handler.removeCallbacks(retryRunnable)
             handler.postDelayed(retryRunnable, 2000L * retryCount)
         } else {
-            showStatus("Canal indisponível no momento.\nEscolha outro canal ou tente mais tarde.")
+            tryNextVariant(current ?: return)
+        }
+    }
+
+    private fun streamVariant(channel: Channel, index: Int): StreamVariant =
+        if (index == 0) StreamVariant(channel.url, channel.userAgent, channel.referer)
+        else channel.alternatives[index - 1]
+
+    private fun tryNextVariant(channel: Channel, finalMessage: String? = null) {
+        val next = activeVariantIndex + 1
+        if (next < channel.alternatives.size + 1) {
+            activeVariantIndex = next
+            retryCount = 0
+            val variant = streamVariant(channel, activeVariantIndex)
+            val variantChannel = channel.copy(url = variant.url, userAgent = variant.userAgent, referer = variant.referer)
+            showStatus("Tentando outra fonte de " + channel.name + "…")
+            play(channel, defaultModeFor(variantChannel), isRetry = true)
+        } else {
+            showStatus(finalMessage ?: "Nenhuma fonte deste canal respondeu. Escolha outro canal ou tente mais tarde.")
         }
     }
 
@@ -722,15 +741,20 @@ class MainActivity : AppCompatActivity() {
         input.setText(prefs.playlistUrl)
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.0"
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.1"
 
         settingsDialog = AlertDialog.Builder(this)
             .setTitle("Configurações")
             .setView(view)
             .setPositiveButton("Salvar e recarregar") { _, _ ->
                 val url = input.text.toString().trim()
-                if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
-                    toast("URL inválida. Ela deve começar com http:// ou https://")
+                val urls = url.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                if (urls.isEmpty() || urls.any { !it.startsWith("http://", true) && !it.startsWith("https://", true) }) {
+                    toast("Cada fonte deve começar com http:// ou https://")
+                    return@setPositiveButton
+                }
+                if (extractPageLinks.isChecked && urls.size > 1) {
+                    toast("A extração de páginas aceita uma URL por vez.")
                     return@setPositiveButton
                 }
                 applyUrl(url, extractPageLinks.isChecked)
