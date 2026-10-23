@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="URL da lista de canais (M3U / M3U8):"
+        android:text="URL da lista M3U ou página pública com links de canais:"
         android:textColor="@color/white"
         android:textSize="16sp" />
 
@@ -17,12 +17,28 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:hint="http://exemplo.com/lista.m3u"
+        android:hint="https://exemplo.com/canais"
         android:imeOptions="actionDone|flagNoExtractUi"
         android:importantForAutofill="no"
         android:inputType="textUri"
         android:singleLine="true"
         android:textColor="@color/white" />
+
+    <CheckBox
+        android:id="@+id/extractPageLinks"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:buttonTint="@color/white"
+        android:text="Extrair links internos desta página"
+        android:textColor="@color/white" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Importa nomes e links de páginas públicas do mesmo site. Cada item abre a página original; não extrai nem contorna streams protegidos."
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
 
     <TextView
         android:id="@+id/settingsInfo"
