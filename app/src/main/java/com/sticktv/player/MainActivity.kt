@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         if (stoppedInBackground) {
             stoppedInBackground = false
-            if (!inWebFallback) current?.let { play(it, mode) }
+            if (!inWebFallback) current?.let { play(it, mode, isRetry = true) }
         }
     }
 
