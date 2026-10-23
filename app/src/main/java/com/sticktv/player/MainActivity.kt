@@ -206,7 +206,416 @@ class MainActivity : AppCompatActivity() {
         loading = findViewById(R.id.loading)
         statusText = findViewById(R.id.statusText)
         numberInput = findViewById(R.id.numberInput)
-  …4011 tokens truncated…
+        infoBanner = findViewById(R.id.infoBanner)
+        infoLogo = findViewById(R.id.infoLogo)
+        infoName = findViewById(R.id.infoName)
+        infoGroup = findViewById(R.id.infoGroup)
+        panel = findViewById(R.id.panel)
+        searchBox = findViewById(R.id.searchBox)
+        settingsButton = findViewById(R.id.settingsButton)
+        categoryList = findViewById(R.id.categoryList)
+        channelList = findViewById(R.id.channelList)
+        countText = findViewById(R.id.countText)
+    }
+
+    private fun setupPlayer() {
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(10_000, 30_000, 1_500, 3_000)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
+        player = ExoPlayer.Builder(this, renderers)
+            .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, true)
+            .build()
+        player.playWhenReady = true
+        playerView.player = player
+
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                loading.isVisible = playbackState == Player.STATE_BUFFERING
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        reachedReady = true
+                        retryCount = 0
+                        hideStatus()
+                    }
+                    Player.STATE_ENDED -> if (current != null) scheduleRetry()
+                    else -> Unit
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                handleError(error)
+            }
+        })
+    }
+
+    private fun setupLists() {
+        channelAdapter = ChannelAdapter(
+            onClick = { ch -> onChannelChosen(ch) },
+            onLongClick = { ch, pos -> toggleFavorite(ch, pos) },
+            onLeft = { focusSelectedCategory() }
+        )
+        channelList.layoutManager = LinearLayoutManager(this)
+        channelList.adapter = channelAdapter
+        channelList.itemAnimator = null
+        channelList.setHasFixedSize(true)
+        channelList.setItemViewCacheSize(20)
+
+        categoryAdapter = CategoryAdapter { cat -> onCategoryFocused(cat) }
+        categoryList.layoutManager = LinearLayoutManager(this)
+        categoryList.adapter = categoryAdapter
+        categoryList.itemAnimator = null
+        categoryList.setHasFixedSize(true)
+    }
+
+    private fun setupSearch() {
+        searchBox.doAfterTextChanged {
+            handler.removeCallbacks(searchRunnable)
+            handler.postDelayed(searchRunnable, 250)
+        }
+        searchBox.setOnEditorActionListener { _, _, _ ->
+            handler.removeCallbacks(searchRunnable)
+            applyFilter()
+            hideKeyboard()
+            if (filtered.isNotEmpty()) focusChannelAt(0)
+            true
+        }
+    }
+
+    private fun setupBack() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    panel.isVisible && searchBox.hasFocus() && !searchBox.text.isNullOrEmpty() ->
+                        searchBox.setText("")
+                    panel.isVisible && current != null && !inWebFallback ->
+                        hidePanel()
+                    else -> {
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastBackPress < 2000) {
+                            finish()
+                        } else {
+                            lastBackPress = now
+                            toast("Pressione VOLTAR novamente para sair")
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    // ---------------------------------------------------------------- lista de canais
+
+    private fun loadPlaylist(initial: Boolean) {
+        val url = prefs.playlistUrl.trim()
+        if (url.isEmpty()) {
+            showStatus("Nenhuma lista configurada.\nPressione MENU para configurar.")
+            showSettings()
+            return
+        }
+        scope.launch {
+            if (initial) {
+                val cached = try {
+                    repo.loadCached(url)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                if (cached.isNotEmpty()) setChannels(cached, autoplay = true)
+            }
+
+            if (allChannels.isEmpty()) {
+                showStatus("Carregando lista de canais…")
+                loading.visibility = View.VISIBLE
+            }
+
+            try {
+                val fresh = repo.download(url)
+                setChannels(fresh, autoplay = current == null)
+                if (!initial) toast("Lista atualizada: ${fresh.size} canais")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (allChannels.isEmpty() || current == null) {
+                    showStatus(
+                        "Não foi possível carregar a lista.\n${e.message ?: ""}\n\n" +
+                            "Pressione MENU para trocar a URL."
+                    )
+                    if (allChannels.isEmpty()) showSettings()
+                } else {
+                    toast("Sem conexão com a lista. Usando a cópia salva.")
+                }
+            } finally {
+                loading.isVisible = player.playbackState == Player.STATE_BUFFERING
+            }
+        }
+    }
+
+    private fun setChannels(list: List<Channel>, autoplay: Boolean) {
+        allChannels = list
+        val groups = LinkedHashSet<String>()
+        for (ch in list) groups.add(ch.group)
+        categories = listOf(CAT_ALL, CAT_FAV) + groups
+        if (selectedCategory !in categories) selectedCategory = CAT_ALL
+        categoryAdapter.submit(categories, selectedCategory)
+        zapList = list
+        applyFilter()
+
+        if (autoplay) {
+            val last = prefs.lastChannelUrl
+            val ch = list.firstOrNull { it.url == last } ?: list.firstOrNull()
+            if (ch != null) play(ch)
+        } else {
+            val cur = current
+            if (cur != null) current = list.firstOrNull { it.url == cur.url } ?: cur
+        }
+    }
+
+    private fun applyFilter() {
+        val q = searchBox.text?.toString().orEmpty().normalizeForSearch()
+        filtered = when {
+            q.isNotEmpty() -> allChannels.filter { it.searchKey.contains(q) }
+            selectedCategory == CAT_ALL -> allChannels
+            selectedCategory == CAT_FAV -> allChannels.filter { it.url in favorites }
+            else -> allChannels.filter { it.group == selectedCategory }
+        }
+        channelAdapter.submit(filtered, favorites, current?.url)
+        val title = if (q.isNotEmpty()) "Pesquisa" else selectedCategory
+        countText.text = "$title  •  ${filtered.size} canais"
+    }
+
+    private fun onCategoryFocused(cat: String) {
+        if (SystemClock.uptimeMillis() - panelShownAt < 300) return
+        pendingCategory = cat
+        handler.removeCallbacks(categoryRunnable)
+        handler.postDelayed(categoryRunnable, 150)
+    }
+
+    private fun selectCategory(cat: String) {
+        val searching = !searchBox.text.isNullOrEmpty()
+        if (cat == selectedCategory && !searching) return
+        selectedCategory = cat
+        categoryAdapter.setSelected(cat)
+        if (searching) searchBox.setText("")
+        handler.removeCallbacks(searchRunnable)
+        applyFilter()
+        (channelList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(0, 0)
+    }
+
+    private fun onChannelChosen(ch: Channel) {
+        zapList = if (searchBox.text.isNullOrEmpty()) filtered else allChannels
+        play(ch)
+        hidePanel()
+    }
+
+    private fun toggleFavorite(ch: Channel, pos: Int) {
+        val adding = ch.url !in favorites
+        favorites = if (adding) favorites + ch.url else favorites - ch.url
+        prefs.favorites = favorites
+        channelAdapter.setFavorites(favorites)
+        if (pos != RecyclerView.NO_POSITION) channelAdapter.notifyItemChanged(pos)
+        toast(if (adding) "★ ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
+    }
+
+    // ---------------------------------------------------------------- reprodução
+
+    private fun defaultModeFor(ch: Channel): Mode =
+        if (ch.url.contains("m3u8", ignoreCase = true)) Mode.HLS else Mode.AUTO
+
+    private fun play(ch: Channel, newMode: Mode = defaultModeFor(ch), isRetry: Boolean = false) {
+        handler.removeCallbacks(retryRunnable)
+        handler.removeCallbacks(pendingPlayRunnable)
+        pendingChannel = null
+        if (!isRetry) retryCount = 0
+
+        current = ch
+        mode = newMode
+        reachedReady = false
+        inWebFallback = false
+        prefs.lastChannelUrl = ch.url
+        if (!isRetry) hideStatus()
+
+        player.setMediaSource(buildMediaSource(ch, newMode == Mode.HLS))
+        player.prepare()
+        player.playWhenReady = true
+
+        channelAdapter.setPlaying(ch.url)
+        if (!isRetry) showInfo(ch)
+    }
+
+    private fun buildMediaSource(ch: Channel, hls: Boolean): MediaSource {
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent(ch.userAgent ?: Config.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(15_000)
+        ch.referer?.let { http.setDefaultRequestProperties(mapOf("Referer" to it)) }
+
+        val dataSource = DefaultDataSource.Factory(this, http)
+        val builder = MediaItem.Builder().setUri(ch.url)
+        if (hls) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+        val item = builder.build()
+
+        return if (hls) {
+            HlsMediaSource.Factory(dataSource)
+                .setAllowChunklessPreparation(true)
+                .createMediaSource(item)
+        } else {
+            DefaultMediaSourceFactory(dataSource, extractorsFactory).createMediaSource(item)
+        }
+    }
+
+    private fun handleError(error: PlaybackException) {
+        val ch = current ?: return
+        loading.visibility = View.GONE
+        val formatError = error.errorCode in FORMAT_ERRORS
+        when {
+            error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                player.seekToDefaultPosition()
+                player.prepare()
+            }
+            // Link sem extensão que na verdade é HLS
+            formatError && !reachedReady && mode == Mode.AUTO ->
+                play(ch, Mode.HLS, isRetry = true)
+            // Não é stream: é uma página web -> abre no modo web com bloqueio de anúncios
+            formatError && !reachedReady && ch.url.startsWith("http", ignoreCase = true) ->
+                openWeb(ch)
+            else -> scheduleRetry()
+        }
+    }
+
+    private fun scheduleRetry() {
+        if (retryCount < MAX_RETRIES) {
+            retryCount++
+            showStatus("Reconectando… ($retryCount/$MAX_RETRIES)")
+            handler.removeCallbacks(retryRunnable)
+            handler.postDelayed(retryRunnable, 2000L * retryCount)
+        } else {
+            showStatus("Canal indisponível no momento.\nEscolha outro canal ou tente mais tarde.")
+        }
+    }
+
+    private fun openWeb(ch: Channel) {
+        player.stop()
+        inWebFallback = true
+        hideStatus()
+        val intent = Intent(this, WebPlayerActivity::class.java)
+            .putExtra(WebPlayerActivity.EXTRA_URL, ch.url)
+            .putExtra(WebPlayerActivity.EXTRA_UA, ch.userAgent)
+            .putExtra(WebPlayerActivity.EXTRA_REFERER, ch.referer)
+        webLauncher.launch(intent)
+    }
+
+    private fun zap(delta: Int) {
+        val list = zapList.ifEmpty { allChannels }
+        if (list.isEmpty()) return
+        val base = pendingChannel ?: current
+        var idx = if (base == null) -1 else list.indexOf(base)
+        if (idx < 0 && base != null) idx = list.indexOfFirst { it.url == base.url }
+        val next = list[if (idx < 0) 0 else (idx + delta).mod(list.size)]
+        pendingChannel = next
+        showInfo(next)
+        handler.removeCallbacks(pendingPlayRunnable)
+        handler.postDelayed(pendingPlayRunnable, 350)
+    }
+
+    // ---------------------------------------------------------------- controle remoto
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        if (code == swallowKey) {
+            if (event.action == KeyEvent.ACTION_UP) swallowKey = -1
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS) {
+                showSettings()
+                return true
+            }
+            if (!panel.isVisible && handlePlayerKey(event)) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun handlePlayerKey(event: KeyEvent): Boolean {
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_DPAD_LEFT -> {
+                swallowKey = event.keyCode
+                showPanel()
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> {
+                zap(1); true
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                zap(-1); true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_INFO -> {
+                (pendingChannel ?: current)?.let { showInfo(it) }
+                true
+            }
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> {
+                onDigit(event.keyCode - KeyEvent.KEYCODE_0)
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun onDigit(d: Int) {
+        if (numberBuffer.length >= 5) numberBuffer = ""
+        numberBuffer += d.toString()
+        numberInput.text = numberBuffer
+        numberInput.visibility = View.VISIBLE
+        handler.removeCallbacks(numberRunnable)
+        handler.postDelayed(numberRunnable, 1500)
+    }
+
+    private fun commitNumber() {
+        val n = numberBuffer.toIntOrNull()
+        numberBuffer = ""
+        numberInput.visibility = View.GONE
+        if (n == null) return
+        val ch = allChannels.firstOrNull { it.number == n }
+        if (ch != null) {
+            zapList = allChannels
+            play(ch)
+        } else {
+            toast("Canal $n não encontrado")
+        }
+    }
+
+    // ---------------------------------------------------------------- interface
+
+    private fun showPanel() {
+        if (panel.isVisible) return
+        panelShownAt = SystemClock.uptimeMillis()
+        handler.removeCallbacks(hideInfoRunnable)
+        infoBanner.visibility = View.GONE
+        panel.visibility = View.VISIBLE
+        val cur = current
+        val pos = if (cur == null) -1 else filtered.indexOf(cur)
+        when {
+            pos >= 0 -> focusChannelAt(pos)
+            filtered.isNotEmpty() -> focusChannelAt(0)
+            else -> settingsButton.requestFocus()
+        }
+    }
+
+    private fun hidePanel() {
+        hideKeyboard()
+        panel.visibility = View.GONE
     }
 
     private fun focusChannelAt(pos: Int, attempt: Int = 0) {
