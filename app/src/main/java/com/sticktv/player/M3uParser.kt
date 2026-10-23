@@ -9,6 +9,7 @@ object M3uParser {
 
         var pendingName: String? = null
         var logo: String? = null
+        var channelId: String? = null
         var group: String? = null
         var userAgent: String? = null
         var referer: String? = null
@@ -17,6 +18,7 @@ object M3uParser {
         fun reset() {
             pendingName = null
             logo = null
+            channelId = null
             group = null
             userAgent = null
             referer = null
@@ -42,6 +44,7 @@ object M3uParser {
 
                     pendingName = title.ifEmpty { "Canal" }
                     logo = (attrs["tvg-logo"] ?: attrs["logo"])?.takeIf { it.isNotBlank() }
+                    channelId = attrs["tvg-id"]?.takeIf { it.isNotBlank() }
                     group = attrs["group-title"]?.takeIf { it.isNotBlank() }
                     userAgent = (attrs["user-agent"] ?: attrs["http-user-agent"])?.takeIf { it.isNotBlank() }
                     referer = (attrs["referer"] ?: attrs["http-referrer"] ?: attrs["http-referer"])
@@ -92,7 +95,8 @@ object M3uParser {
                                 logo = logo,
                                 group = group ?: extGroup ?: "Sem categoria",
                                 userAgent = userAgent,
-                                referer = referer
+                                referer = referer,
+                                channelId = channelId
                             )
                         )
                     }
