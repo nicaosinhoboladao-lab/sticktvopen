@@ -1,49 +1,125 @@
 package com.sticktv.player
 
-object ChannelMerger {
-    private val qualityWords = Regex("""\b(uhd|4k|fhd|full hd|1080p|720p|hd|sd)\b""", RegexOption.IGNORE_CASE)
-    private val separators = Regex("""[^\p{L}\p{N}]+""")
-    private val brazilRegions = setOf("br", "brasil", "brazil", "sp", "rj", "mg", "rs", "pr", "sc", "ba", "pe", "ce", "go", "df", "am", "pa", "mt", "ms", "es", "rn", "pb", "al", "se", "pi", "ma", "to", "ro", "rr", "ap", "ac")
+import java.text.Normalizer
+import java.util.Locale
 
-    fun merge(channels: List<Channel>): List<Channel> {
+object ChannelMerger {
+
+    private val diacritics = Regex("""\p{Mn}+""")
+    private val separators = Regex("""[^\p{L}\p{N}]+""")
+
+    private val qualityWords = Regex(
+        """\b(uhd|8k|4k|fhd|full\s*hd|hd|sd|hq|2160p?|1080p?|720p?|480p?|h\s?26[45]|hevc|\d{2}\s?fps)\b"""
+    )
+
+    // "Alt 2", "Backup", "OpÃ§Ã£o 1", "Link 3" etc. nÃ£o fazem parte do nome do canal
+    private val noiseWords = Regex(
+        """\b(alt|alternativo|backup|bkp|reserva|opcao|op|link|fonte|server|srv|sinal)\s*\d*\b"""
+    )
+
+    private val leadingNoise = setOf("tv", "rede", "canal", "br", "brasil", "brazil")
+    private val trailingNoise = setOf("tv", "ao", "vivo", "live", "br", "brasil", "brazil", "24h", "24hs")
+
+    private val brazilRegions = setOf(
+        "sp", "rj", "mg", "rs", "pr", "sc", "ba", "pe", "ce", "go", "df", "am", "pa", "mt",
+        "ms", "es", "rn", "pb", "al", "se", "pi", "ma", "to", "ro", "rr", "ap", "ac"
+    )
+
+    /**
+     * Junta canais iguais vindos de listas diferentes.
+     * A primeira ocorrÃªncia vira a fonte principal; as outras viram alternativas,
+     * na ordem das listas configuradas.
+     *
+     * @param mergeRegionalVariants se true, "Globo SP" e "Globo RJ" viram o mesmo canal.
+     *        O padrÃ£o Ã© false, para que o fallback use exatamente o mesmo canal.
+     */
+    fun merge(
+        channels: List<Channel>,
+        mergeRegionalVariants: Boolean = false
+    ): List<Channel> {
         val merged = ArrayList<Channel>()
-        val identityToIndex = HashMap<String, Int>()
+        val keyToIndex = HashMap<String, Int>()
+
         for (channel in channels) {
-            val identities = identities(channel)
-            val index = identities.firstNotNullOfOrNull { identityToIndex[it] }
+            if (channel.url.isBlank()) continue
+
+            val key = identityKey(channel, mergeRegionalVariants)
+            val index = key?.let { keyToIndex[it] }
+
             if (index == null) {
-                val newIndex = merged.size
-                merged.add(channel.copy(number = newIndex + 1, alternatives = channel.alternatives.distinctBy { it.url }))
-                identities.forEach { identityToIndex.putIfAbsent(it, newIndex) }
+                key?.let { keyToIndex[it] = merged.size }
+                merged.add(
+                    channel.copy(
+                        alternatives = cleanAlternatives(channel.url, channel.alternatives)
+                    )
+                )
                 continue
             }
 
             val previous = merged[index]
-            val candidates = previous.alternatives +
-                (if (previous.url != channel.url) listOf(StreamVariant(channel.url, channel.userAgent, channel.referer)) else emptyList()) +
-                channel.alternatives
-            merged[index] = previous.copy(alternatives = candidates.distinctBy { it.url }.filterNot { it.url == previous.url })
-            identities.forEach { identityToIndex.putIfAbsent(it, index) }
+            val incoming = buildList {
+                add(StreamVariant(channel.url, channel.userAgent, channel.referer))
+                addAll(channel.alternatives)
+            }
+
+            merged[index] = previous.copy(
+                alternatives = cleanAlternatives(previous.url, previous.alternatives + incoming)
+            )
         }
-        return merged.mapIndexed { index, item -> item.copy(number = index + 1) }
+
+        return merged.mapIndexed { i, item -> item.copy(number = i + 1) }
     }
 
-    private fun identities(channel: Channel): List<String> = buildList {
-        channel.channelId?.normalizeForSearch()?.takeIf { it.isNotBlank() }?.let { add("id:$it") }
-        canonicalName(channel.name)?.let { add("name:$it") }
+    /** Chave usada para reconhecer o mesmo canal em listas diferentes. */
+    fun identityKey(channel: Channel, mergeRegionalVariants: Boolean = false): String? {
+        canonicalName(channel.name, mergeRegionalVariants)?.let { return "name:$it" }
+
+        // tvg-id sÃ³ Ã© usado quando o nome nÃ£o serve, porque muitas listas
+        // repetem o mesmo id para canais regionais diferentes.
+        return channel.channelId
+            ?.let { normalize(it) }
+            ?.replace(separators, "")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "id:$it" }
     }
 
-    private fun canonicalName(name: String): String? {
-        val cleaned = separators.replace(qualityWords.replace(name.normalizeForSearch(), " "), " ").trim()
-        val words = cleaned.split(Regex("\\s+")).filter { it.isNotBlank() }.toMutableList()
-        while (words.firstOrNull()?.let { it == "tv" || it == "rede" } == true) words.removeAt(0)
-        while (words.lastOrNull()?.let { it in setOf("tv", "ao", "vivo", "live", "br", "brasil", "brazil") || it in brazilRegions } == true) {
+    private fun cleanAlternatives(
+        mainUrl: String,
+        list: List<StreamVariant>
+    ): List<StreamVariant> {
+        val main = mainUrl.trim()
+        return list
+            .filter { it.url.isNotBlank() && it.url.trim() != main }
+            .distinctBy { it.url.trim() }
+    }
+
+    private fun normalize(text: String): String =
+        Normalizer.normalize(text, Normalizer.Form.NFKD) // á´´á´° -> HD, Â² -> 2
+            .replace(diacritics, "")
+            .lowercase(Locale.ROOT)
+
+    private fun canonicalName(name: String, mergeRegional: Boolean): String? {
+        var text = normalize(name)
+        text = noiseWords.replace(text, " ")
+        text = qualityWords.replace(text, " ")
+
+        val words = text
+            .split(separators)
+            .filter { it.isNotBlank() }
+            .toMutableList()
+
+        // size > 1 evita que "TV Brasil" vire um nome vazio
+        while (words.size > 1 && words[0] in leadingNoise) {
+            words.removeAt(0)
+        }
+
+        while (words.size > 1) {
+            val last = words.last()
+            val remove = last in trailingNoise || (mergeRegional && last in brazilRegions)
+            if (!remove) break
             words.removeAt(words.lastIndex)
         }
+
         return words.joinToString("").takeIf { it.isNotBlank() }
     }
 }
-
-
-
-
