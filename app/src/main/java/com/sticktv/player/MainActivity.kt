@@ -325,7 +325,7 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             if (initial) {
                 val cached = try {
-                    repo.loadCached(url)
+                    repo.loadCached(url, prefs.extractPageLinks)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -340,7 +340,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             try {
-                val fresh = repo.download(url)
+                val fresh = repo.download(url, prefs.extractPageLinks)
                 setChannels(fresh, autoplay = current == null)
                 if (!initial) toast("Lista atualizada: ${fresh.size} canais")
             } catch (e: CancellationException) {
@@ -676,6 +676,8 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.dialog_settings, null)
         val input = view.findViewById<EditText>(R.id.urlInput)
         val info = view.findViewById<TextView>(R.id.settingsInfo)
+        val extractPageLinks = view.findViewById<android.widget.CheckBox>(R.id.extractPageLinks)
+        extractPageLinks.isChecked = prefs.extractPageLinks
         input.setText(prefs.playlistUrl)
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
@@ -690,19 +692,20 @@ class MainActivity : AppCompatActivity() {
                     toast("URL inválida. Ela deve começar com http:// ou https://")
                     return@setPositiveButton
                 }
-                applyUrl(url)
+                applyUrl(url, extractPageLinks.isChecked)
             }
             .setNeutralButton("Restaurar padrão") { _, _ ->
-                applyUrl(Config.DEFAULT_PLAYLIST_URL)
+                applyUrl(Config.DEFAULT_PLAYLIST_URL, extractPageLinks = false)
             }
             .setNegativeButton("Cancelar", null)
             .create()
         settingsDialog?.show()
     }
 
-    private fun applyUrl(url: String) {
-        val changed = url != prefs.playlistUrl
+    private fun applyUrl(url: String, extractPageLinks: Boolean) {
+        val changed = url != prefs.playlistUrl || extractPageLinks != prefs.extractPageLinks
         prefs.playlistUrl = url
+        prefs.extractPageLinks = extractPageLinks
         if (changed) {
             handler.removeCallbacks(retryRunnable)
             current = null
