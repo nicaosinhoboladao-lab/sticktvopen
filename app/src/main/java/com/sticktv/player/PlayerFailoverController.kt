@@ -64,7 +64,6 @@ class PlayerFailoverController(
     }
 
     override fun onPlayerError(error: PlaybackException) {
-        // Ficou atrÃ¡s da janela ao vivo: nÃ£o Ã© falha do canal, sÃ³ volta ao "ao vivo"
         if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
             player.seekToDefaultPosition()
             player.prepare()
@@ -86,7 +85,7 @@ class PlayerFailoverController(
                     if (player.playbackState == Player.STATE_BUFFERING) switchToNext()
                 }
             }
-            Player.STATE_ENDED -> switchToNext() // canal ao vivo "terminou" = sinal caiu
+            Player.STATE_ENDED -> switchToNext()
             else -> Unit
         }
     }
@@ -97,16 +96,20 @@ class PlayerFailoverController(
         stallJob?.cancel()
 
         switchJob = scope.launch {
-            onStatus("Canal fora do ar, procurando outra fonteâ€¦")
+            onStatus("Canal fora do ar; procurando outra fonte...")
             val next = fo.next()
-            if (fo !== failover) return@launch // o usuÃ¡rio trocou de canal no meio do processo
+            if (fo !== failover) return@launch
 
             if (next != null) {
-                onStatus("Usando fonte alternativa ${fo.position} de ${fo.total}")
-                start(next, forceHls = requestedHlsForChannel || next.url.contains(".m3u8", ignoreCase = true))
+                onStatus("Tentando fonte alternativa ${fo.position} de ${fo.total}...")
+                start(
+                    next,
+                    forceHls = requestedHlsForChannel ||
+                        next.url.contains(".m3u8", ignoreCase = true)
+                )
             } else {
                 player.stop()
-                onStatus("Nenhuma fonte disponÃ­vel para este canal.")
+                onStatus("N\u00e3o foi encontrada outra fonte para este canal.")
             }
         }
     }

@@ -10,7 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
-/** Teste rÃ¡pido para saber se uma URL de stream estÃ¡ respondendo. */
+/** Faz uma verificacao rapida da resposta de uma fonte de video. */
 object StreamProbe {
 
     suspend fun isAlive(variant: StreamVariant, timeoutMs: Int = 6_000): Boolean =
@@ -56,6 +56,7 @@ object StreamProbe {
                 val hlsContent = isHls ||
                     conn.contentType?.contains("mpegurl", ignoreCase = true) == true
 
+                // Some valid servers reject probes; the player will still attempt the source.
                 return if (hlsContent) {
                     head.trimStart('\uFEFF', ' ', '\r', '\n', '\t').startsWith("#EXTM3U")
                 } else {
@@ -68,7 +69,7 @@ object StreamProbe {
     }
 }
 
-/** MemÃ³ria de quais fontes funcionam ou falham. */
+/** Keeps a short history of sources that worked or failed. */
 class StreamHealth(context: Context) {
 
     private val prefs = context.applicationContext
@@ -101,7 +102,7 @@ class StreamHealth(context: Context) {
     }
 }
 
-/** Controla a troca de fontes de UM canal. */
+/** Selects another source for the same channel after playback fails. */
 class ChannelFailover(
     private val channel: Channel,
     private val health: StreamHealth
@@ -118,13 +119,15 @@ class ChannelFailover(
     init {
         val all = (listOf(StreamVariant(channel.url, channel.userAgent, channel.referer)) +
             channel.alternatives)
+            .filter { it.url.isNotBlank() }
             .distinctBy { it.url.trim() }
-
+        val available = all.ifEmpty {
+            listOf(StreamVariant(channel.url, channel.userAgent, channel.referer))
+        }
         val preferred = health.preferredUrl(channel)
 
-        // Ordem: fonte que funcionou da Ãºltima vez, depois as que nÃ£o falharam
-        // recentemente, mantendo a ordem original das listas.
-        candidates = all.sortedWith(
+        // Prefer the last working source and sources without recent failures.
+        candidates = available.sortedWith(
             compareBy<StreamVariant>(
                 { it.url != preferred },
                 { health.isRecentlyFailed(it.url) }
@@ -136,27 +139,25 @@ class ChannelFailover(
 
     fun markWorking() = health.markWorking(channel, current.url)
 
-    /** Marca a fonte atual como quebrada e devolve a prÃ³xima que responder, ou null. */
+    /**
+     * Prefer sources that respond, but do not discard the others:
+     * some servers block the probe while still playing in the player.
+     */
     suspend fun next(): StreamVariant? {
         health.markFailed(current.url)
-
         val remaining = candidates.filter { it.url !in tried }
-        for (batch in remaining.chunked(3)) {
-            val alive = coroutineScope {
-                batch.map { async { StreamProbe.isAlive(it) } }.awaitAll()
-            }
+        if (remaining.isEmpty()) return null
 
-            batch.forEachIndexed { i, variant ->
-                tried += variant.url
-                if (!alive[i]) health.markFailed(variant.url)
-            }
-
-            val index = alive.indexOfFirst { it }
-            if (index >= 0) {
-                current = batch[index]
-                return current
-            }
+        val batch = remaining.take(3)
+        val alive = coroutineScope {
+            batch.map { async { StreamProbe.isAlive(it) } }.awaitAll()
         }
-        return null
+        val aliveIndex = alive.indexOfFirst { it }
+        val next = if (aliveIndex >= 0) batch[aliveIndex] else batch.first()
+
+        // An inconclusive probe does not remove a source; the player will still try it.
+        tried += next.url
+        current = next
+        return current
     }
 }

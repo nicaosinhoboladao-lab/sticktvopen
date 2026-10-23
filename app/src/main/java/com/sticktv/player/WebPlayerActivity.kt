@@ -28,8 +28,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * Player de reserva para links que são páginas web (não streams diretos).
- * Bloqueia anúncios, pop-ups, redirecionamentos e alertas, e deixa o vídeo em tela cheia.
+ * Player de reserva para links que sao paginas web (nao streams diretos).
+ * Bloqueia anuncios, pop-ups, redirecionamentos e alertas, e deixa o video em tela cheia.
  */
 class WebPlayerActivity : AppCompatActivity() {
 
@@ -79,7 +79,7 @@ class WebPlayerActivity : AppCompatActivity() {
         )
 
         val hint = TextView(this).apply {
-            text = "▲/▼ trocar canal   •   VOLTAR abre a lista"
+            text = "CH + / CH - troca de canal   |   VOLTAR abre a lista"
             setTextColor(Color.WHITE)
             textSize = 16f
             setBackgroundResource(R.drawable.bg_rounded)
@@ -160,7 +160,7 @@ class WebPlayerActivity : AppCompatActivity() {
         if (AdBlocker.isAd(uri)) return true
         if (!mainFrame || redirect) return false
         val host = uri.host ?: return true
-        // Bloqueia redirecionamentos da página principal para outros sites (pop-unders)
+        // Bloqueia redirecionamentos da pagina principal para outros sites (pop-unders)
         return AdBlocker.baseDomain(host) != allowedBase
     }
 

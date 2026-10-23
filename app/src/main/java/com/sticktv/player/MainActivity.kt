@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val CAT_ALL = "Todos os canais"
-        private const val CAT_FAV = "â˜… Favoritos"
+        private const val CAT_FAV = "Favoritos"
     }
     private val scope = MainScope()
     private val handler = Handler(Looper.getMainLooper())
@@ -300,7 +300,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (allChannels.isEmpty()) {
-                showStatus("Carregando lista de canaisÃ¢â‚¬Â¦")
+                showStatus("Carregando a lista de canais...")
                 loading.visibility = View.VISIBLE
             }
 
@@ -320,12 +320,12 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 if (allChannels.isEmpty() || current == null) {
                     showStatus(
-                        "NÃƒÂ£o foi possÃƒÂ­vel carregar a lista.\n${e.message ?: ""}\n\n" +
+                        "N\u00e3o foi poss\u00edvel carregar a lista.\n${e.message ?: ""}\n\n" +
                             "Pressione MENU para trocar a URL."
                     )
                     if (allChannels.isEmpty()) showSettings()
                 } else {
-                    toast("Sem conexÃƒÂ£o com a lista. Usando a cÃƒÂ³pia salva.")
+                    toast("Sem conex\u00e3o com a lista. Usando a c\u00f3pia salva.")
                 }
             } finally {
                 loading.isVisible = player.playbackState == Player.STATE_BUFFERING
@@ -363,7 +363,7 @@ class MainActivity : AppCompatActivity() {
         }
         channelAdapter.submit(filtered, favorites, current?.sourcePageUrl ?: current?.url)
         val title = if (q.isNotEmpty()) "Pesquisa" else selectedCategory
-        countText.text = "$title  Ã¢â‚¬Â¢  ${filtered.size} canais"
+        countText.text = "$title  \u00b7  ${filtered.size} canais"
     }
 
     private fun onCategoryFocused(cat: String) {
@@ -396,10 +396,10 @@ class MainActivity : AppCompatActivity() {
         prefs.favorites = favorites
         channelAdapter.setFavorites(favorites)
         if (pos != RecyclerView.NO_POSITION) channelAdapter.notifyItemChanged(pos)
-        toast(if (adding) "Ã¢Ëœâ€¦ ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
+        toast(if (adding) "\u2605 ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
     }
 
-    // ---------------------------------------------------------------- reproduÃƒÂ§ÃƒÂ£o
+    // ---------------------------------------------------------------- reproducao
 
     private fun defaultModeFor(ch: Channel): Mode =
         if (ch.url.contains("m3u8", ignoreCase = true)) Mode.HLS else Mode.AUTO
@@ -414,14 +414,14 @@ class MainActivity : AppCompatActivity() {
         channelAdapter.setPlaying(ch.url)
         showInfo(ch)
         loading.visibility = View.VISIBLE
-        showStatus("Procurando um link de vÃƒÂ­deo pÃƒÂºblico na pÃƒÂ¡gina...")
+        showStatus("Procurando um link de v\u00eddeo p\u00fablico na p\u00e1gina...")
         scope.launch {
             try {
                 val streamUrl = repo.resolvePublicStream(ch)
                 if (generation != pageResolveGeneration || current?.url != ch.url) return@launch
                 loading.visibility = View.GONE
                 if (streamUrl.isNullOrBlank()) {
-                    showStatus("A pÃƒÂ¡gina nÃƒÂ£o publica um link de vÃƒÂ­deo direto compatÃƒÂ­vel.")
+                    showStatus("A p\u00e1gina n\u00e3o publicou um link de v\u00eddeo direto compat\u00edvel.")
                     return@launch
                 }
                 hideStatus()
@@ -431,7 +431,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 if (generation == pageResolveGeneration) {
                     loading.visibility = View.GONE
-                    showStatus("NÃƒÂ£o foi possÃƒÂ­vel ler a pÃƒÂ¡gina: ${e.message ?: "erro de conexÃƒÂ£o"}")
+                    showStatus("N\u00e3o foi poss\u00edvel ler a p\u00e1gina: ${e.message ?: "erro de conex\u00e3o"}")
                 }
             }
         }
@@ -541,7 +541,7 @@ class MainActivity : AppCompatActivity() {
             zapList = allChannels
             play(ch)
         } else {
-            toast("Canal $n nÃƒÂ£o encontrado")
+            toast("Canal $n n\u00e3o encontrado")
         }
     }
 
@@ -618,7 +618,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    // ---------------------------------------------------------------- configuraÃƒÂ§ÃƒÂµes
+    // ---------------------------------------------------------------- configuracoes
 
     private fun showSettings() {
         if (settingsDialog?.isShowing == true) return
@@ -626,30 +626,48 @@ class MainActivity : AppCompatActivity() {
         val input = view.findViewById<EditText>(R.id.urlInput)
         val info = view.findViewById<TextView>(R.id.settingsInfo)
         val extractPageLinks = view.findViewById<android.widget.CheckBox>(R.id.extractPageLinks)
+        val publicListsButton = view.findViewById<Button>(R.id.publicListsButton)
+        publicListsButton.setOnClickListener {
+            val currentUrls = input.text.toString().lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .toList()
+            val combined = (currentUrls + Config.PUBLIC_PORTUGUESE_PLAYLISTS).distinct()
+            val added = combined.size - currentUrls.size
+            input.setText(combined.joinToString("\n"))
+            input.setSelection(input.text.length)
+            extractPageLinks.isChecked = false
+            toast(if (added > 0) {
+                "$added listas p\u00fablicas em portugu\u00eas do GitHub adicionadas. Toque em Salvar e recarregar."
+            } else {
+                "As listas p\u00fablicas em portugu\u00eas do GitHub j\u00e1 est\u00e3o na configura\u00e7\u00e3o."
+            })
+        }
         extractPageLinks.isChecked = prefs.extractPageLinks
         input.setText(prefs.playlistUrl)
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
             (if (lastSourceSummary.isNotBlank()) "$lastSourceSummary\n" else "") +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.3"
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.4"
 
         settingsDialog = AlertDialog.Builder(this)
-            .setTitle("ConfiguraÃƒÂ§ÃƒÂµes")
+            .setTitle("Configura\u00e7\u00f5es")
             .setView(view)
             .setPositiveButton("Salvar e recarregar") { _, _ ->
                 val url = input.text.toString().trim()
                 val urls = url.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
                 if (urls.isEmpty() || urls.any { !it.startsWith("http://", true) && !it.startsWith("https://", true) }) {
-                    toast("Cada fonte deve comeÃƒÂ§ar com http:// ou https://")
+                    toast("Cada fonte deve come\u00e7ar com http:// ou https://")
                     return@setPositiveButton
                 }
                 if (extractPageLinks.isChecked && urls.size > 1) {
-                    toast("A extraÃƒÂ§ÃƒÂ£o de pÃƒÂ¡ginas aceita uma URL por vez.")
+                    toast("A extra\u00e7\u00e3o de p\u00e1ginas aceita uma URL por vez.")
                     return@setPositiveButton
                 }
                 applyUrl(url, extractPageLinks.isChecked)
             }
-            .setNeutralButton("Restaurar padrÃƒÂ£o") { _, _ ->
+            .setNeutralButton("Restaurar padr\u00e3o") { _, _ ->
                 applyUrl(Config.DEFAULT_PLAYLIST_URL, extractPageLinks = false)
             }
             .setNegativeButton("Cancelar", null)
@@ -669,6 +687,4 @@ class MainActivity : AppCompatActivity() {
         loadPlaylist(initial = false)
     }
 }
-
-
 

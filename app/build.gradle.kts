@@ -11,8 +11,8 @@ android {
         applicationId = "com.sticktv.player"
         minSdk = 21
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     buildTypes {
@@ -23,7 +23,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Assina com a chave debug para o APK jÃƒÂ¡ sair instalÃƒÂ¡vel
+            // Use debug signing for an installable APK.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -67,5 +67,4 @@ dependencies {
 
     implementation("com.github.bumptech.glide:glide:4.16.0")
 }
-
 

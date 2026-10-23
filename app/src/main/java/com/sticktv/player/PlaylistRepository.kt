@@ -67,10 +67,10 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
             throw IOException("Nenhuma URL configurada.")
         }
         if (extractPageLinks && sources.size > 1) {
-            throw IOException("Use apenas uma pÃ¡gina por vez ao extrair links de sites.")
+            throw IOException("Use apenas uma p\u00e1gina por vez ao extrair links de sites.")
         }
 
-        // Baixa vÃ¡rias listas ao mesmo tempo, mas mantÃ©m a ordem original:
+        // Baixa v\u00e1rias listas ao mesmo tempo, mas mant\u00e9m a ordem original:
         // a primeira lista continua sendo a fonte principal.
         val semaphore = Semaphore(MAX_PARALLEL_DOWNLOADS)
         val results = coroutineScope {
@@ -88,7 +88,7 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
         val merged = ChannelMerger.merge(loaded)
         if (merged.isEmpty()) {
             throw IOException(
-                "Nenhuma lista pÃ´de ser carregada. " + failures.joinToString("; ")
+                "Nenhuma lista p\u00f4de ser carregada. " + failures.joinToString("; ")
             )
         }
 
@@ -97,7 +97,7 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
             prefs.cacheUrl = url
             prefs.cacheExtractPageLinks = extractPageLinks
         } catch (_: Exception) {
-            // Falha no cache nÃ£o impede o uso da lista
+            // Cache failure does not stop playlist loading.
         }
 
         PlaylistLoadResult(
@@ -130,9 +130,9 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
 
                 throw IOException(
                     if (html && !extractPageLinks) {
-                        "pÃ¡gina HTML; marque \"Extrair links\" para essa fonte"
+                        "p\u00e1gina HTML; marque \"Extrair links\" para essa fonte"
                     } else {
-                        "lista vazia ou formato invÃ¡lido"
+                        "lista vazia ou formato inv\u00e1lido"
                     }
                 )
             }
@@ -141,7 +141,7 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: OutOfMemoryError) {
-            SourceResult.Failure("${hostOf(source)}: lista grande demais para a memÃ³ria do aparelho")
+            SourceResult.Failure("${hostOf(source)}: lista grande demais para a mem\u00f3ria do aparelho")
         } catch (e: Exception) {
             SourceResult.Failure("${hostOf(source)}: ${e.message ?: "falha desconhecida"}")
         }
@@ -204,7 +204,7 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
                 if (code in 300..399) {
                     val location = conn.getHeaderField("Location")
                     if (location == null || ++redirects > MAX_REDIRECTS) {
-                        throw IOException("redirecionamento invÃ¡lido")
+                        throw IOException("redirecionamento inv\u00e1lido")
                     }
                     url = URL(url, location)
                     continue
@@ -222,7 +222,7 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
 
                 return input.bufferedReader(Charsets.UTF_8)
                     .use { it.readText() }
-                    .removePrefix("\uFEFF") // BOM quebra a detecÃ§Ã£o de #EXTM3U
+                    .removePrefix("\uFEFF") // Remove the UTF-8 BOM before parsing
             } finally {
                 conn.disconnect()
             }

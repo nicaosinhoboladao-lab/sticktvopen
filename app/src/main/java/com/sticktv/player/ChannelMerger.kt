@@ -12,7 +12,7 @@ object ChannelMerger {
         """\b(uhd|8k|4k|fhd|full\s*hd|hd|sd|hq|2160p?|1080p?|720p?|480p?|h\s?26[45]|hevc|\d{2}\s?fps)\b"""
     )
 
-    // "Alt 2", "Backup", "OpÃ§Ã£o 1", "Link 3" etc. nÃ£o fazem parte do nome do canal
+    // Ignore source labels such as Alt, Backup, Option, and Link when matching channel names
     private val noiseWords = Regex(
         """\b(alt|alternativo|backup|bkp|reserva|opcao|op|link|fonte|server|srv|sinal)\s*\d*\b"""
     )
@@ -27,11 +27,11 @@ object ChannelMerger {
 
     /**
      * Junta canais iguais vindos de listas diferentes.
-     * A primeira ocorrÃªncia vira a fonte principal; as outras viram alternativas,
-     * na ordem das listas configuradas.
+     * The first match is the primary source; later matches become alternatives,
+     * in the configured playlist order.
      *
      * @param mergeRegionalVariants se true, "Globo SP" e "Globo RJ" viram o mesmo canal.
-     *        O padrÃ£o Ã© false, para que o fallback use exatamente o mesmo canal.
+     *        The default is false so fallback keeps regional channels separate.
      */
     fun merge(
         channels: List<Channel>,
@@ -74,8 +74,8 @@ object ChannelMerger {
     fun identityKey(channel: Channel, mergeRegionalVariants: Boolean = false): String? {
         canonicalName(channel.name, mergeRegionalVariants)?.let { return "name:$it" }
 
-        // tvg-id sÃ³ Ã© usado quando o nome nÃ£o serve, porque muitas listas
-        // repetem o mesmo id para canais regionais diferentes.
+        // Use tvg-id only when the name is unavailable because many playlists
+        // reuse the same id for different regional channels.
         return channel.channelId
             ?.let { normalize(it) }
             ?.replace(separators, "")
@@ -94,7 +94,7 @@ object ChannelMerger {
     }
 
     private fun normalize(text: String): String =
-        Normalizer.normalize(text, Normalizer.Form.NFKD) // á´´á´° -> HD, Â² -> 2
+        Normalizer.normalize(text, Normalizer.Form.NFKD) // Normalize accents and quality labels
             .replace(diacritics, "")
             .lowercase(Locale.ROOT)
 

@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="URLs das listas M3U (uma por linha) ou página pública:"
+        android:text="URLs das listas M3U (uma por linha) ou p&#225;gina p&#250;blica:"
         android:textColor="@color/white"
         android:textSize="16sp" />
 
@@ -25,19 +25,28 @@
         android:maxLines="5"
         android:textColor="@color/white" />
 
+    <Button
+        android:id="@+id/publicListsButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Adicionar listas em portugu&#234;s do GitHub"
+        android:textAllCaps="false"
+        android:textColor="@color/white" />
+
     <CheckBox
         android:id="@+id/extractPageLinks"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:buttonTint="@color/white"
-        android:text="Extrair links internos desta página"
+        android:text="Extrair links internos desta p&#225;gina"
         android:textColor="@color/white" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Para carregar várias listas, coloque uma URL por linha. Canais com nomes iguais são agrupados; se um stream falhar, o app tenta a próxima fonte disponível."
+        android:text="Use uma URL por linha. O bot&#227;o adiciona listas p&#250;blicas do projeto iptv-org no GitHub. Toque em Salvar e recarregar para carregar os canais. Fontes do mesmo canal s&#227;o usadas como alternativas."
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 
