@@ -55,7 +55,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val CAT_ALL = "Todos os canais"
-        private const val CAT_FAV = "★ Favoritos"
+        private const val CAT_FAV = "â˜… Favoritos"
         private const val MAX_RETRIES = 1
         private val FORMAT_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
@@ -111,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     private var lastBackPress = 0L
     private var panelShownAt = 0L
     private var settingsDialog: AlertDialog? = null
+    private var lastSourceSummary = ""
 
     private val extractorsFactory by lazy {
         DefaultExtractorsFactory()
@@ -336,25 +337,32 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (allChannels.isEmpty()) {
-                showStatus("Carregando lista de canais…")
+                showStatus("Carregando lista de canaisâ€¦")
                 loading.visibility = View.VISIBLE
             }
 
             try {
-                val fresh = repo.download(url, prefs.extractPageLinks)
+                val loaded = repo.download(url, prefs.extractPageLinks)
+                val fresh = loaded.channels
+                lastSourceSummary = buildString {
+                    append("Fontes carregadas: ${loaded.loadedSourceCount}/${loaded.sourceCount}\n")
+                    append("Canais recebidos: ${loaded.inputChannelCount} | canais agrupados: ${fresh.size}\n")
+                    append("Alternativas encontradas: ${loaded.alternativeCount}")
+                    if (loaded.failures.isNotEmpty()) append("\nFontes com erro: ${loaded.failures.joinToString("; ")}")
+                }
                 setChannels(fresh, autoplay = current == null)
-                if (!initial) toast("Lista atualizada: ${fresh.size} canais")
+                toast("${loaded.loadedSourceCount}/${loaded.sourceCount} listas; ${fresh.size} canais; ${loaded.alternativeCount} alternativas")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (allChannels.isEmpty() || current == null) {
                     showStatus(
-                        "Não foi possível carregar a lista.\n${e.message ?: ""}\n\n" +
+                        "NÃ£o foi possÃ­vel carregar a lista.\n${e.message ?: ""}\n\n" +
                             "Pressione MENU para trocar a URL."
                     )
                     if (allChannels.isEmpty()) showSettings()
                 } else {
-                    toast("Sem conexão com a lista. Usando a cópia salva.")
+                    toast("Sem conexÃ£o com a lista. Usando a cÃ³pia salva.")
                 }
             } finally {
                 loading.isVisible = player.playbackState == Player.STATE_BUFFERING
@@ -392,7 +400,7 @@ class MainActivity : AppCompatActivity() {
         }
         channelAdapter.submit(filtered, favorites, current?.sourcePageUrl ?: current?.url)
         val title = if (q.isNotEmpty()) "Pesquisa" else selectedCategory
-        countText.text = "$title  •  ${filtered.size} canais"
+        countText.text = "$title  â€¢  ${filtered.size} canais"
     }
 
     private fun onCategoryFocused(cat: String) {
@@ -425,10 +433,10 @@ class MainActivity : AppCompatActivity() {
         prefs.favorites = favorites
         channelAdapter.setFavorites(favorites)
         if (pos != RecyclerView.NO_POSITION) channelAdapter.notifyItemChanged(pos)
-        toast(if (adding) "★ ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
+        toast(if (adding) "â˜… ${ch.name} adicionado aos favoritos" else "${ch.name} removido dos favoritos")
     }
 
-    // ---------------------------------------------------------------- reprodução
+    // ---------------------------------------------------------------- reproduÃ§Ã£o
 
     private fun defaultModeFor(ch: Channel): Mode =
         if (ch.url.contains("m3u8", ignoreCase = true)) Mode.HLS else Mode.AUTO
@@ -444,14 +452,14 @@ class MainActivity : AppCompatActivity() {
         channelAdapter.setPlaying(ch.url)
         showInfo(ch)
         loading.visibility = View.VISIBLE
-        showStatus("Procurando um link de vídeo público na página...")
+        showStatus("Procurando um link de vÃ­deo pÃºblico na pÃ¡gina...")
         scope.launch {
             try {
                 val streamUrl = repo.resolvePublicStream(ch)
                 if (generation != pageResolveGeneration || current?.url != ch.url) return@launch
                 loading.visibility = View.GONE
                 if (streamUrl.isNullOrBlank()) {
-                    showStatus("A página não publica um link de vídeo direto compatível.")
+                    showStatus("A pÃ¡gina nÃ£o publica um link de vÃ­deo direto compatÃ­vel.")
                     return@launch
                 }
                 hideStatus()
@@ -461,7 +469,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 if (generation == pageResolveGeneration) {
                     loading.visibility = View.GONE
-                    showStatus("Não foi possível ler a página: ${e.message ?: "erro de conexão"}")
+                    showStatus("NÃ£o foi possÃ­vel ler a pÃ¡gina: ${e.message ?: "erro de conexÃ£o"}")
                 }
             }
         }
@@ -531,7 +539,7 @@ class MainActivity : AppCompatActivity() {
             formatError && !reachedReady && mode == Mode.AUTO ->
                 play(ch, Mode.HLS, isRetry = true)
             formatError && ch.sourcePageUrl != null ->
-                tryNextVariant(ch, "O link de vídeo encontrado não tem um formato compatível.")
+                tryNextVariant(ch, "O link de vÃ­deo encontrado nÃ£o tem um formato compatÃ­vel.")
             else -> scheduleRetry()
         }
     }
@@ -539,7 +547,7 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleRetry() {
         if (retryCount < MAX_RETRIES) {
             retryCount++
-            showStatus("Reconectando… (" + retryCount + "/" + MAX_RETRIES + ")")
+            showStatus("Reconectandoâ€¦ (" + retryCount + "/" + MAX_RETRIES + ")")
             handler.removeCallbacks(retryRunnable)
             handler.postDelayed(retryRunnable, 2000L * retryCount)
         } else {
@@ -558,7 +566,7 @@ class MainActivity : AppCompatActivity() {
             retryCount = 0
             val variant = streamVariant(channel, activeVariantIndex)
             val variantChannel = channel.copy(url = variant.url, userAgent = variant.userAgent, referer = variant.referer)
-            showStatus("Tentando outra fonte de " + channel.name + "…")
+            showStatus("Tentando outra fonte de " + channel.name + "â€¦")
             play(channel, defaultModeFor(variantChannel), isRetry = true)
         } else {
             showStatus(finalMessage ?: "Nenhuma fonte deste canal respondeu. Escolha outro canal ou tente mais tarde.")
@@ -652,7 +660,7 @@ class MainActivity : AppCompatActivity() {
             zapList = allChannels
             play(ch)
         } else {
-            toast("Canal $n não encontrado")
+            toast("Canal $n nÃ£o encontrado")
         }
     }
 
@@ -729,7 +737,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    // ---------------------------------------------------------------- configurações
+    // ---------------------------------------------------------------- configuraÃ§Ãµes
 
     private fun showSettings() {
         if (settingsDialog?.isShowing == true) return
@@ -741,25 +749,26 @@ class MainActivity : AppCompatActivity() {
         input.setText(prefs.playlistUrl)
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.1"
+            (if (lastSourceSummary.isNotBlank()) "$lastSourceSummary\n" else "") +
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.2"
 
         settingsDialog = AlertDialog.Builder(this)
-            .setTitle("Configurações")
+            .setTitle("ConfiguraÃ§Ãµes")
             .setView(view)
             .setPositiveButton("Salvar e recarregar") { _, _ ->
                 val url = input.text.toString().trim()
                 val urls = url.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
                 if (urls.isEmpty() || urls.any { !it.startsWith("http://", true) && !it.startsWith("https://", true) }) {
-                    toast("Cada fonte deve começar com http:// ou https://")
+                    toast("Cada fonte deve comeÃ§ar com http:// ou https://")
                     return@setPositiveButton
                 }
                 if (extractPageLinks.isChecked && urls.size > 1) {
-                    toast("A extração de páginas aceita uma URL por vez.")
+                    toast("A extraÃ§Ã£o de pÃ¡ginas aceita uma URL por vez.")
                     return@setPositiveButton
                 }
                 applyUrl(url, extractPageLinks.isChecked)
             }
-            .setNeutralButton("Restaurar padrão") { _, _ ->
+            .setNeutralButton("Restaurar padrÃ£o") { _, _ ->
                 applyUrl(Config.DEFAULT_PLAYLIST_URL, extractPageLinks = false)
             }
             .setNegativeButton("Cancelar", null)
@@ -780,3 +789,6 @@ class MainActivity : AppCompatActivity() {
         loadPlaylist(initial = false)
     }
 }
+
+
+
