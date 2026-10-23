@@ -7,7 +7,9 @@ data class Channel(
     val logo: String?,
     val group: String,
     val userAgent: String?,
-    val referer: String?
+    val referer: String?,
+    val isPageLink: Boolean = false,
+    val sourcePageUrl: String? = null
 ) {
     val searchKey: String = name.normalizeForSearch()
 }
