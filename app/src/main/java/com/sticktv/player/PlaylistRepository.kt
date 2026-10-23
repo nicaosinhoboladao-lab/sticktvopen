@@ -37,6 +37,10 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
         list
     }
 
+    suspend fun resolvePublicStream(channel: Channel): String? = withContext(Dispatchers.IO) {
+        val page = httpGet(channel.url)
+        HtmlLinkParser.extractPublicStream(page, channel.url)
+    }
     private fun parseContent(content: String, sourceUrl: String, extractPageLinks: Boolean): List<Channel> =
         if (extractPageLinks) HtmlLinkParser.parse(content, sourceUrl) else M3uParser.parse(content)
 
