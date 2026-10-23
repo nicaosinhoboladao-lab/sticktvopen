@@ -18,23 +18,38 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
         if (prefs.cacheUrl != url || prefs.cacheExtractPageLinks != extractPageLinks || !cacheFile.exists()) {
             return@withContext emptyList()
         }
-        parseContent(cacheFile.readText(), url, extractPageLinks)
+        ChannelMerger.merge(parseContent(cacheFile.readText(), url.lineSequence().first(), extractPageLinks))
     }
 
     suspend fun download(url: String, extractPageLinks: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
-        val text = httpGet(url)
-        val list = parseContent(text, url, extractPageLinks)
-        if (list.isEmpty()) {
-            val detail = if (extractPageLinks) "Nenhum link interno de página foi encontrado." else "A resposta não é uma playlist M3U válida."
-            throw IOException(detail)
+        val sources = url.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.distinct().toList()
+        if (sources.isEmpty()) throw IOException("Nenhuma URL configurada.")
+        if (extractPageLinks && sources.size > 1) throw IOException("Use apenas uma página por vez ao extrair links de site.")
+
+        val loaded = ArrayList<Channel>()
+        val texts = ArrayList<String>()
+        val failures = ArrayList<String>()
+        for (source in sources) {
+            try {
+                val text = httpGet(source)
+                val parsed = parseContent(text, source, extractPageLinks)
+                if (parsed.isEmpty()) throw IOException("lista vazia ou formato inválido")
+                texts.add(text)
+                loaded.addAll(parsed)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                failures.add(source.substringAfter("://").substringBefore("/") + ": " + (e.message ?: "falha"))
+            }
         }
+        val result = ChannelMerger.merge(loaded)
+        if (result.isEmpty()) throw IOException("Nenhuma lista pôde ser carregada. " + failures.joinToString("; "))
         try {
-            cacheFile.writeText(text)
+            cacheFile.writeText(texts.joinToString("\n"))
             prefs.cacheUrl = url
             prefs.cacheExtractPageLinks = extractPageLinks
         } catch (_: Exception) {
         }
-        list
+        result
     }
 
     suspend fun resolvePublicStream(channel: Channel): String? = withContext(Dispatchers.IO) {
