@@ -14,22 +14,31 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
     private val cacheFile = File(context.filesDir, "playlist_cache.m3u")
 
     /** Lista salva no aparelho: o app abre instantaneamente, mesmo se o servidor estiver lento. */
-    suspend fun loadCached(url: String): List<Channel> = withContext(Dispatchers.IO) {
-        if (prefs.cacheUrl != url || !cacheFile.exists()) return@withContext emptyList()
-        M3uParser.parse(cacheFile.readText())
+    suspend fun loadCached(url: String, extractPageLinks: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
+        if (prefs.cacheUrl != url || prefs.cacheExtractPageLinks != extractPageLinks || !cacheFile.exists()) {
+            return@withContext emptyList()
+        }
+        parseContent(cacheFile.readText(), url, extractPageLinks)
     }
 
-    suspend fun download(url: String): List<Channel> = withContext(Dispatchers.IO) {
+    suspend fun download(url: String, extractPageLinks: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
         val text = httpGet(url)
-        val list = M3uParser.parse(text)
-        if (list.isEmpty()) throw IOException("A lista está vazia ou não é um M3U válido.")
+        val list = parseContent(text, url, extractPageLinks)
+        if (list.isEmpty()) {
+            val detail = if (extractPageLinks) "Nenhum link interno de página foi encontrado." else "A resposta não é uma playlist M3U válida."
+            throw IOException(detail)
+        }
         try {
             cacheFile.writeText(text)
             prefs.cacheUrl = url
+            prefs.cacheExtractPageLinks = extractPageLinks
         } catch (_: Exception) {
         }
         list
     }
+
+    private fun parseContent(content: String, sourceUrl: String, extractPageLinks: Boolean): List<Channel> =
+        if (extractPageLinks) HtmlLinkParser.parse(content, sourceUrl) else M3uParser.parse(content)
 
     private fun httpGet(start: String): String {
         var url = URL(start)
