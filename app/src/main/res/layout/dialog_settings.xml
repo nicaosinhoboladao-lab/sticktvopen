@@ -30,7 +30,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:text="Adicionar listas em portugu&#234;s do GitHub"
+        android:text="Buscar listas em portugu&#234;s no GitHub"
         android:textAllCaps="false"
         android:textColor="@color/white" />
 
@@ -46,7 +46,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Use uma URL por linha. O bot&#227;o adiciona listas p&#250;blicas do projeto iptv-org no GitHub. Toque em Salvar e recarregar para carregar os canais. Fontes do mesmo canal s&#227;o usadas como alternativas."
+        android:text="Use uma URL por linha. O bot&#227;o consulta o cat&#225;logo p&#250;blico do projeto iptv-org no GitHub e busca listas em portugu&#234;s. Toque em Salvar e recarregar para carregar os canais. Fontes do mesmo canal s&#227;o usadas como alternativas."
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 

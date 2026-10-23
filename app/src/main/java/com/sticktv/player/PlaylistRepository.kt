@@ -13,6 +13,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.GZIPInputStream
+import org.json.JSONObject
 import kotlin.coroutines.cancellation.CancellationException
 
 data class PlaylistLoadResult(
@@ -109,6 +110,30 @@ class PlaylistRepository(context: Context, private val prefs: Prefs) {
         )
     }
 
+    /**
+     * Checks the public iptv-org GitHub Pages tree for Portuguese and Lusophone playlists.
+     */
+    suspend fun searchPublicPortuguesePlaylists(): List<String> =
+        withContext(Dispatchers.IO) {
+            val response = httpGet(Config.PUBLIC_PLAYLIST_CATALOG_API)
+            val tree = JSONObject(response).optJSONArray("tree")
+                ?: throw IOException("O GitHub n\u00e3o retornou o cat\u00e1logo de listas.")
+
+            val availablePaths = HashSet<String>()
+            for (index in 0 until tree.length()) {
+                val path = tree.optJSONObject(index)?.optString("path").orEmpty()
+                if (path.isNotBlank()) availablePaths += path
+            }
+
+            val found = Config.PUBLIC_PORTUGUESE_PLAYLIST_PATHS
+                .filter { it in availablePaths }
+                .map { Config.publicPlaylistUrl(it) }
+
+            if (found.isEmpty()) {
+                throw IOException("Nenhuma lista em portugu\u00eas foi encontrada no GitHub.")
+            }
+            found
+        }
     suspend fun resolvePublicStream(channel: Channel): String? =
         withContext(Dispatchers.IO) {
             val page = httpGet(channel.url)

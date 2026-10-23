@@ -628,28 +628,52 @@ class MainActivity : AppCompatActivity() {
         val extractPageLinks = view.findViewById<android.widget.CheckBox>(R.id.extractPageLinks)
         val publicListsButton = view.findViewById<Button>(R.id.publicListsButton)
         publicListsButton.setOnClickListener {
-            val currentUrls = input.text.toString().lineSequence()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .distinct()
-                .toList()
-            val combined = (currentUrls + Config.PUBLIC_PORTUGUESE_PLAYLISTS).distinct()
-            val added = combined.size - currentUrls.size
-            input.setText(combined.joinToString("\n"))
-            input.setSelection(input.text.length)
-            extractPageLinks.isChecked = false
-            toast(if (added > 0) {
-                "$added listas p\u00fablicas em portugu\u00eas do GitHub adicionadas. Toque em Salvar e recarregar."
-            } else {
-                "As listas p\u00fablicas em portugu\u00eas do GitHub j\u00e1 est\u00e3o na configura\u00e7\u00e3o."
-            })
+            publicListsButton.isEnabled = false
+            toast("Buscando listas p\u00fablicas em portugu\u00eas no GitHub...")
+            scope.launch {
+                try {
+                    val currentUrls = input.text.toString().lineSequence()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .toList()
+
+                    var usedFallback = false
+                    val foundUrls = try {
+                        repo.searchPublicPortuguesePlaylists()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        usedFallback = true
+                        Config.PUBLIC_PORTUGUESE_PLAYLISTS
+                    }
+
+                    val combined = (currentUrls + foundUrls).distinct()
+                    val added = (combined.size - currentUrls.size).coerceAtLeast(0)
+                    input.setText(combined.joinToString("\n"))
+                    input.setSelection(input.text.length)
+                    extractPageLinks.isChecked = false
+
+                    val message = when {
+                        usedFallback ->
+                            "O GitHub n\u00e3o respondeu. Adicionei as listas de reserva; toque em Salvar e recarregar."
+                        added > 0 ->
+                            "${foundUrls.size} listas p\u00fablicas em portugu\u00eas encontradas; ${added} adicionadas. Toque em Salvar e recarregar."
+                        else ->
+                            "As listas p\u00fablicas encontradas j\u00e1 est\u00e3o na configura\u00e7\u00e3o."
+                    }
+                    toast(message)
+                } finally {
+                    publicListsButton.isEnabled = true
+                }
+            }
         }
         extractPageLinks.isChecked = prefs.extractPageLinks
         input.setText(prefs.playlistUrl)
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
             (if (lastSourceSummary.isNotBlank()) "$lastSourceSummary\n" else "") +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.4"
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.5"
 
         settingsDialog = AlertDialog.Builder(this)
             .setTitle("Configura\u00e7\u00f5es")
