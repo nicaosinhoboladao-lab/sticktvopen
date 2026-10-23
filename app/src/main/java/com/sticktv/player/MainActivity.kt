@@ -778,7 +778,7 @@ class MainActivity : AppCompatActivity() {
         input.setSelection(input.text.length)
         info.text = "Canais carregados: ${allChannels.size}\n" +
             (if (lastSourceSummary.isNotBlank()) "$lastSourceSummary\n" else "") +
-            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.5"
+            "Dica: segure OK sobre um canal para favoritar.\nStickTV v1.6"
 
         settingsDialog = AlertDialog.Builder(this)
             .setTitle("Configura\u00e7\u00f5es")
