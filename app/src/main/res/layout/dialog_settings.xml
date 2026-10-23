@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="URL da lista M3U ou página pública com links de canais:"
+        android:text="URLs das listas M3U (uma por linha) ou página pública:"
         android:textColor="@color/white"
         android:textSize="16sp" />
 
@@ -17,11 +17,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:hint="https://exemplo.com/canais"
+        android:hint="https://exemplo.com/lista.m3u"
         android:imeOptions="actionDone|flagNoExtractUi"
         android:importantForAutofill="no"
-        android:inputType="textUri"
-        android:singleLine="true"
+        android:inputType="textMultiLine|textUri"
+        android:minLines="2"
+        android:maxLines="5"
         android:textColor="@color/white" />
 
     <CheckBox
@@ -36,7 +37,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Importa nomes e links de páginas públicas do mesmo site. Cada item abre a página original; não extrai nem contorna streams protegidos."
+        android:text="Para carregar várias listas, coloque uma URL por linha. Canais com nomes iguais são agrupados; se um stream falhar, o app tenta a próxima fonte disponível."
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 
