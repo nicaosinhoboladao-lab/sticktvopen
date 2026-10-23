@@ -80,6 +80,11 @@ class MainActivity : AppCompatActivity() {
     private var favorites: Set<String> = emptySet()
     private var selectedCategory = CAT_ALL
     private var pendingCategory: String? = null
+    private var categoryReorderMode = false
+    private var categoryOrderSnapshot: List<String>? = null
+    private var reorderingCategory: String? = null
+    private var categoryCenterHeld = false
+    private var reorderConfirmBlockedUntilUp = false
 
     private var current: Channel? = null
     private var pendingChannel: Channel? = null
@@ -235,7 +240,10 @@ class MainActivity : AppCompatActivity() {
         channelList.setHasFixedSize(true)
         channelList.setItemViewCacheSize(20)
 
-        categoryAdapter = CategoryAdapter { cat -> onCategoryFocused(cat) }
+        categoryAdapter = CategoryAdapter(
+            onFocused = { cat -> onCategoryFocused(cat) },
+            onLongPressed = { cat -> beginCategoryReorder(cat) }
+        )
         categoryList.layoutManager = LinearLayoutManager(this)
         categoryList.adapter = categoryAdapter
         categoryList.itemAnimator = null
@@ -337,7 +345,9 @@ class MainActivity : AppCompatActivity() {
         allChannels = list
         val groups = LinkedHashSet<String>()
         for (ch in list) groups.add(ch.group)
-        categories = listOf(CAT_ALL, CAT_FAV) + groups
+        val availableCategories = (listOf(CAT_ALL, CAT_FAV) + groups).distinct()
+        val savedOrder = prefs.categoryOrder.filter { it in availableCategories }.distinct()
+        categories = savedOrder + availableCategories.filter { it !in savedOrder }
         if (selectedCategory !in categories) selectedCategory = CAT_ALL
         categoryAdapter.submit(categories, selectedCategory)
         zapList = list
@@ -367,6 +377,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onCategoryFocused(cat: String) {
+        if (categoryReorderMode) return
         if (SystemClock.uptimeMillis() - panelShownAt < 300) return
         pendingCategory = cat
         handler.removeCallbacks(categoryRunnable)
@@ -482,9 +493,49 @@ class MainActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
+        val isCenter = code == KeyEvent.KEYCODE_DPAD_CENTER ||
+            code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+        if (isCenter) categoryCenterHeld = event.action == KeyEvent.ACTION_DOWN
+
         if (code == swallowKey) {
             if (event.action == KeyEvent.ACTION_UP) swallowKey = -1
             return true
+        }
+        if (categoryReorderMode) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                when (code) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        moveReorderingCategory(-1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        moveReorderingCategory(1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        if (reorderConfirmBlockedUntilUp) return true
+                        saveCategoryOrder()
+                        swallowKey = code
+                        return true
+                    }
+                    KeyEvent.KEYCODE_BACK -> {
+                        cancelCategoryReorder()
+                        swallowKey = code
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> return true
+                    KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_SETTINGS -> {
+                        cancelCategoryReorder()
+                        showSettings()
+                        swallowKey = code
+                        return true
+                    }
+                }
+            } else if (isCenter && reorderConfirmBlockedUntilUp) {
+                reorderConfirmBlockedUntilUp = false
+                return true
+            }
         }
         if (event.action == KeyEvent.ACTION_DOWN) {
             if (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS) {
@@ -493,7 +544,61 @@ class MainActivity : AppCompatActivity() {
             }
             if (!panel.isVisible && handlePlayerKey(event)) return true
         }
-        return super.dispatchKeyEvent(event)
+        val handled = super.dispatchKeyEvent(event)
+        if (categoryReorderMode && isCenter && event.action == KeyEvent.ACTION_DOWN) return true
+        return handled
+    }
+
+    private fun beginCategoryReorder(category: String) {
+        if (categories.size < 2 || categoryReorderMode) return
+        handler.removeCallbacks(categoryRunnable)
+        pendingCategory = null
+        categoryOrderSnapshot = categories.toList()
+        reorderingCategory = category
+        categoryReorderMode = true
+        reorderConfirmBlockedUntilUp = categoryCenterHeld
+        categoryAdapter.setReordering(category)
+        toast("Organizar categorias: use ↑/↓, OK salva e Voltar cancela")
+    }
+
+    private fun moveReorderingCategory(delta: Int) {
+        val moving = reorderingCategory ?: return
+        val updated = categories.toMutableList()
+        val from = updated.indexOf(moving)
+        if (from < 0) return
+        val to = (from + delta).coerceIn(0, updated.lastIndex)
+        if (to == from) return
+        updated.removeAt(from)
+        updated.add(to, moving)
+        categories = updated
+        categoryAdapter.submit(categories, selectedCategory)
+        categoryAdapter.setReordering(moving)
+        categoryList.scrollToPosition(to)
+        categoryList.post {
+            categoryList.findViewHolderForAdapterPosition(to)?.itemView?.requestFocus()
+        }
+    }
+
+    private fun saveCategoryOrder() {
+        prefs.categoryOrder = categories
+        finishCategoryReorder()
+        toast("Ordem das categorias salva")
+    }
+
+    private fun cancelCategoryReorder() {
+        categoryOrderSnapshot?.let { categories = it }
+        categoryAdapter.submit(categories, selectedCategory)
+        finishCategoryReorder()
+        focusSelectedCategory()
+        toast("Organização cancelada")
+    }
+
+    private fun finishCategoryReorder() {
+        categoryReorderMode = false
+        categoryOrderSnapshot = null
+        reorderingCategory = null
+        reorderConfirmBlockedUntilUp = false
+        categoryAdapter.setReordering(null)
     }
 
     private fun handlePlayerKey(event: KeyEvent): Boolean {
