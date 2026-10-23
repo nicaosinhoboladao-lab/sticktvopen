@@ -14,6 +14,14 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_CACHE_URL, null)
         set(value) = sp.edit().putString(KEY_CACHE_URL, value).apply()
 
+    var extractPageLinks: Boolean
+        get() = sp.getBoolean(KEY_EXTRACT_PAGE_LINKS, false)
+        set(value) = sp.edit().putBoolean(KEY_EXTRACT_PAGE_LINKS, value).apply()
+
+    var cacheExtractPageLinks: Boolean
+        get() = sp.getBoolean(KEY_CACHE_EXTRACT_PAGE_LINKS, false)
+        set(value) = sp.edit().putBoolean(KEY_CACHE_EXTRACT_PAGE_LINKS, value).apply()
+
     var lastChannelUrl: String?
         get() = sp.getString(KEY_LAST, null)
         set(value) = sp.edit().putString(KEY_LAST, value).apply()
@@ -25,6 +33,8 @@ class Prefs(context: Context) {
     companion object {
         private const val KEY_URL = "playlist_url"
         private const val KEY_CACHE_URL = "cache_url"
+        private const val KEY_EXTRACT_PAGE_LINKS = "extract_page_links"
+        private const val KEY_CACHE_EXTRACT_PAGE_LINKS = "cache_extract_page_links"
         private const val KEY_LAST = "last_channel"
         private const val KEY_FAV = "favorites"
     }
